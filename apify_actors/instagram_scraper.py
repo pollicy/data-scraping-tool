@@ -74,7 +74,6 @@ def ScrapeUserComentsAndPosts(client, username, end_time:datetime.datetime, max_
     scraped_posts_df = ScrapePosts(client, url, end_time, max_posts)
     
     all_comments_df = pd.DataFrame()
-    print(scraped_posts_df.head())
     post_urls = scraped_posts_df['url'].values
     
     print(f"Scraping comments from {len(post_urls)} posts...")
