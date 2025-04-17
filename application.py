@@ -58,6 +58,7 @@ def main():
                                       help="Your API key will be securely stored in local storage")
         if st.button("Save API Key", use_container_width=True):
             if api_key_input:
+                print(api_key_input)
                 save_api_key(api_key_input)
                 st.success("API Key saved successfully!")
                 st.rerun()

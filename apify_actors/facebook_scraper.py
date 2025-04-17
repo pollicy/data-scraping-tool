@@ -72,7 +72,7 @@ def ScrapePostsAndComments(client, facebook_handle, end_time:datetime.datetime, 
         print(f"Found {len(post_urls)} posts to process for comments")
         
         for post_url in tqdm(post_urls, desc=f"Scraping comments for {facebook_handle}'s posts", unit="post"):
-            comments_df = ScrapePostComments(client, post_url, end_time, max_comments)
+            comments_df = ScrapePostComments(client, post_url, max_comments)
             if not comments_df.empty:
                 # Add post_url to each comment record
                 comments_df['post_url'] = post_url

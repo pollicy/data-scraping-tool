@@ -34,18 +34,28 @@ pip install -r requirements.txt
 
 1. Create an Apify account at [apify.com](https://apify.com)
 2. Get your API token from the Apify Console
-3. Set your token as an environment variable:
-    ```bash
-    export APIFY_TOKEN=your_token_here
-    ```
-    On Windows:
-    ```
-    set APIFY_TOKEN=your_token_here
-    ```
+3. Paste it into the system, the key is stored in your browser using localstorage so it won't in anyway be access maliciously from the server:
 
 ## Usage
 
-### Coming soon
+![Social Media Scraper Interface](static/interface.png)
+
+
+1. Run the application:
+
+```bash
+python main.py
+```
+
+2. The web interface will open in your default browser.
+
+3. Enter your Apify token when prompted.
+
+4. Select the platform and data you wish to scrape:
+
+5. Configure your search parameters and click "Start Scraping".
+
+6. Results will be displayed in the interface and can be exported as CSV or JSON.
 
 
 ## Ethical Considerations

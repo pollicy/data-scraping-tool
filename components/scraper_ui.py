@@ -6,6 +6,7 @@ import json
 from components.auth import localS
 from utils.manage_social_handles import add_social_handle, remove_social_handle, get_social_handles
 import time
+from apify_actors import scrape_data
 
 def render_scraper_ui(platform):
     """Render the main scraper UI based on the selected platform"""
@@ -107,14 +108,6 @@ def render_scraper_ui(platform):
             help="Select the end date for data collection"
         )
         
-        # Time selection
-        time_options = st.selectbox(
-            "Time Range",
-            ["Last 24 hours", "Last 7 days", "Last 30 days", "Custom Range"],
-            index=1,
-            help="Select a predefined time range or use custom dates"
-        )
-        
         # New section for data limits
         st.markdown("### Data Limits")
         col_posts, col_comments = st.columns(2)
@@ -154,9 +147,21 @@ def render_scraper_ui(platform):
                 # Prepare job configuration
                 platform_dict = localS.getItem("social_handles")
                 
-                print(platform_dict)
-                print(max_posts, max_comments)
-                print(start_date, end_date)
+                scraped_df_dict = scrape_data(
+                    start=start_date,
+                    end=end_date,
+                    max_posts=max_posts,
+                    max_comments=max_comments,
+                    user_handles=platform_dict
+                )
+                
+                facebook_df = scraped_df_dict.get("facebook")
+                instagram_df = scraped_df_dict.get("instagram")
+                twitter_df = scraped_df_dict.get("twitter")
+                
+                print(facebook_df.head())
+                print(instagram_df.head())
+                print(twitter_df.head())
                 st.session_state.scraping = True
                 st.session_state.progress = 0
                 st.rerun()
