@@ -1,7 +1,6 @@
 # app.py - Main application file
 
 import streamlit as st
-from components.auth import validate, save_api_key
 from components.auth import localS
 from components.sidebar import render_sidebar
 from components.scraper_ui import render_scraper_ui
@@ -59,7 +58,10 @@ def main():
         if st.button("Save API Key", use_container_width=True):
             if api_key_input:
                 print(api_key_input)
-                save_api_key(api_key_input)
+                
+                # Save API key to local storage
+                localS.setItem("APIFY_API_KEY", api_key_input, key="save_api_key")
+                
                 st.success("API Key saved successfully!")
                 st.rerun()
             else:

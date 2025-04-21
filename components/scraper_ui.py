@@ -1,114 +1,158 @@
-# components/scraper_ui.py - UI for scraper configuration
-
 import streamlit as st
 from datetime import datetime, timedelta
-import json
+import pandas as pd
+from io import BytesIO
 from components.auth import localS
-from utils.manage_social_handles import add_social_handle, remove_social_handle, get_social_handles
-import time
-from apify_actors import scrape_data
+from utils.manage_social_handles import add_social_handle, remove_social_handle, get_social_handles # Assuming these exist
+from apify_actors import scrape_data # Assuming this exists
+from components.auth import localS
+
+
+def show_all_usernames_dialog(platform, handles):
+    """Displays all usernames in a dialog with remove buttons."""
+    platform_handles = handles.get(platform, [])
+    st.write(f"Total usernames: {len(platform_handles)}")
+
+    # Display all usernames with remove buttons inside the dialog
+    for i, username in enumerate(platform_handles):
+        d_col_name, d_col_remove = st.columns([4, 1])
+        with d_col_name:
+            # Use markdown for simple list item appearance
+            st.markdown(f"- {username}")
+        with d_col_remove:
+            # Use unique keys for removal buttons inside the dialog
+            if st.button("Remove", key=f"remove_dialog_{platform}_{i}", use_container_width=True):
+                # Modify the handles dictionary directly
+                handles[platform].remove(username)
+                localS.setItem("social_handles", handles)
+                st.rerun()
 
 def render_scraper_ui(platform):
     """Render the main scraper UI based on the selected platform"""
-    
+
     st.markdown(f'<h2 class="sub-header">{platform} Data Scraper</h2>', unsafe_allow_html=True)
-    
+
+    # Initialize session state for scraped data if not present
+    if "scraped_data" not in st.session_state:
+        st.session_state.scraped_data = {}
+    if "scraping" not in st.session_state:
+        st.session_state.scraping = False
+    if "scraping_platform" not in st.session_state:
+         st.session_state.scraping_platform = None
+
     # Create columns for better layout
     col1, col2 = st.columns([3, 2])
-    
+
     with col1:
         st.markdown("### Add Usernames")
-        
-        # Initialize storage for social handles if not present
-        if "social_handles" not in st.session_state:
-            st.session_state.social_handles = {}
-            # Initialize in local storage if needed - only once per session
-            if not localS.getItem("social_handles"):
-                localS.setItem("social_handles", {})
-            
-        # Get current handles from storage
-        handles = localS.getItem("social_handles")
-        if not handles:
+
+        handles = localS.getItem("social_handles") or {}
+        if not isinstance(handles, dict): # Basic check if storage is corrupted/unexpected
             handles = {}
-            
+
         # Ensure platform exists in handles
         if platform not in handles:
             handles[platform] = []
-            localS.setItem("social_handles", handles, key=f"init_{platform}")
-            
-        # Update session state with current handles
-        st.session_state.social_handles = handles
-        
+            localS.setItem("social_handles", handles) # Save initialization
+
+        # Make sure the platform key holds a list
+        if not isinstance(handles.get(platform), list):
+             handles[platform] = []
+             localS.setItem("social_handles", handles) # Correct if needed
+
+        platform_handles = handles.get(platform, []) # Use this list reference
+
+
         # Add username input
         username_input = st.text_input(
             f"Enter {platform} username",
-            placeholder=f"e.g. {get_example_username(platform)}"
+            placeholder=f"e.g. {get_example_username(platform)}",
+            key=f"username_input_{platform}" # Add key for potential state issues
         )
-        
+
         col_add, col_clear = st.columns(2)
         with col_add:
-            if st.button("Add Username", use_container_width=True):
+            if st.button("Add Username", use_container_width=True, key=f"add_user_{platform}"):
                 if username_input:
-                    # Check if username already exists
-                    if platform in handles and username_input in handles[platform]:
+                    # Check for duplicates *before* adding
+                    if username_input in platform_handles:
                         st.warning(f"Username '{username_input}' already exists")
                     else:
-                        # Add username to the platform
-                        if platform not in handles:
-                            handles[platform] = []
-                        handles[platform].append(username_input)
-                        localS.setItem("social_handles", handles, key=f"add_{platform}_{username_input}")
-                        st.session_state.social_handles = handles
+                        # Modify the list directly
+                        platform_handles.append(username_input)
+                        localS.setItem("social_handles", handles) # Save updated handles
                         st.success(f"Added: {username_input}")
+                        st.rerun() # Rerun to clear input and update list
                 else:
                     st.warning("Please enter a valid username")
-        
+
         with col_clear:
-            if st.button("Clear All", use_container_width=True):
-                # Clear all usernames for this platform
-                if platform in handles:
-                    handles[platform] = []
-                    localS.setItem("social_handles", handles, key=f"clear_{platform}")
-                    st.session_state.social_handles = handles
-                    st.success("All usernames cleared!")
-        
-        # Get platform-specific usernames
-        platform_usernames = handles.get(platform, [])
-        
-        # Display added usernames
-        if platform_usernames:
+            if st.button("Clear All", use_container_width=True, key=f"clear_users_{platform}"):
+                handles[platform] = [] # Clear the list for this platform
+                platform_handles = handles[platform] # Update local reference
+                localS.setItem("social_handles", handles) # Save cleared list
+                st.success("All usernames cleared!")
+                st.rerun() # Rerun to reflect clearance
+
+        # Display added usernames section
+        if platform_handles:
             st.markdown("### Added Usernames")
-            for i, username in enumerate(platform_usernames):
+            display_limit = 5
+
+            # Display the first few usernames directly
+            usernames_to_show_directly = platform_handles[:display_limit]
+            for i, username in enumerate(usernames_to_show_directly):
                 col_name, col_remove = st.columns([3, 1])
                 with col_name:
                     st.markdown(f"**{i+1}.** {username}")
                 with col_remove:
-                    if st.button("Remove", key=f"remove_{platform}_{i}", use_container_width=True):
-                        # Remove username
-                        handles[platform].remove(username)
-                        localS.setItem("social_handles", handles, key=f"remove_{platform}_{username}")
-                        st.session_state.social_handles = handles
-                        st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    
+                    # Key for main list remove button
+                    if st.button("Remove", key=f"remove_main_{platform}_{i}", use_container_width=True):
+                        # Remove from the list
+                        platform_handles.remove(username)
+                        localS.setItem("social_handles", handles) # Save changes
+                        st.rerun() # Rerun to update the list
+
+            # Add "More..." button if the list exceeds the limit
+            if len(platform_handles) > display_limit:
+                @st.dialog(f"All {platform} Usernames ({len(platform_handles)})", width="large")
+                def display_all_usernames_wrapper():
+                    show_all_usernames_dialog(platform, handles)
+
+                # Button to trigger the dialog
+                if st.button(f"More... ({len(platform_handles) - display_limit} more)", key=f"show_all_users_button_{platform}", use_container_width=True):
+                    display_all_usernames_wrapper() # Call the function decorated with @st.dialog
+
     with col2:
         st.markdown("### Time Settings")
-        
+
         # Date range selection
-        today = datetime.now()
+        today = datetime.now().date() # Use .date() for date inputs
         start_date = st.date_input(
             "Start Date",
             today - timedelta(days=7),
-            help="Select the start date for data collection"
+            max_value=today, # Prevent selecting future start dates
+            help="Select the start date for data collection",
+            key=f"start_date_{platform}"
         )
-        
+
         end_date = st.date_input(
             "End Date",
             today,
-            help="Select the end date for data collection"
+            min_value=start_date, # End date cannot be before start date
+            max_value=today,      # Prevent selecting future end dates
+            help="Select the end date for data collection",
+            key=f"end_date_{platform}"
         )
-        
-        # New section for data limits
+
+        # Validate date range
+        if start_date > end_date:
+            st.error("End date must be on or after start date.")
+            valid_dates = False
+        else:
+            valid_dates = True
+
+        # Data limits
         st.markdown("### Data Limits")
         col_posts, col_comments = st.columns(2)
         with col_posts:
@@ -117,7 +161,8 @@ def render_scraper_ui(platform):
                 min_value=1,
                 value=200,
                 step=50,
-                help="Maximum number of posts to scrape per user"
+                help="Maximum number of posts to scrape per user",
+                key=f"max_posts_{platform}"
             )
         with col_comments:
             max_comments = st.number_input(
@@ -125,61 +170,119 @@ def render_scraper_ui(platform):
                 min_value=1,
                 value=200,
                 step=50,
-                help="Maximum number of comments to scrape per post"
+                help="Maximum number of comments to scrape per post",
+                key=f"max_comments_{platform}"
             )
-        
+
+        # Output format selection
         st.markdown("### Output Format")
         output_format = st.selectbox(
             "Select output format",
             ["CSV", "JSON", "Excel"],
             index=0,
-            help="Choose the file format for the scraped data"
+            help="Choose the file format for the scraped data",
+            key=f"output_format_{platform}"
         )
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-        can_submit = len(platform_usernames) > 0
-        
-    # Only show the button if not currently scraping
-    if not st.session_state.get('scraping', False):
-        if st.button("Start Scraping", disabled=not can_submit, use_container_width=True):
-            if can_submit:
-                # Prepare job configuration
-                platform_dict = localS.getItem("social_handles")
-                
-                scraped_df_dict = scrape_data(
-                    start=start_date,
-                    end=end_date,
-                    max_posts=max_posts,
-                    max_comments=max_comments,
-                    user_handles=platform_dict
-                )
-                
-                facebook_df = scraped_df_dict.get("facebook")
-                instagram_df = scraped_df_dict.get("instagram")
-                twitter_df = scraped_df_dict.get("twitter")
-                
-                print(facebook_df.head())
-                print(instagram_df.head())
-                print(twitter_df.head())
-                st.session_state.scraping = True
-                st.session_state.progress = 0
-                st.rerun()
-            else:
-                st.error("Please add at least one username")
 
-    if st.session_state.get('scraping', False):
-        st.markdown("### Scraping in progress...")
-        
-        with st.spinner("Wait for it...", show_time=True):
-            time.sleep(5)  # Simulate work
-        
-        # Reset scraping state when done
-        st.session_state.scraping = False
-        st.success("Done!")
-        st.rerun()  # Refresh to show the button again
-                    
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Check if there are usernames and dates are valid to scrape
+    can_submit = bool(platform_handles) and valid_dates # Check non-empty list and valid dates
+
+    # Start Scraping button
+    scrape_button_key = f"start_scraping_{platform}"
+    if st.button("Start Scraping", disabled=not can_submit, use_container_width=True, key=scrape_button_key):
+        if can_submit: # Double check condition just in case
+            st.session_state.scraping = True
+            st.session_state.scraping_platform = platform
+            st.rerun() # Rerun to trigger the scraping logic below
+
+    # Perform scraping if in progress for this platform
+    if st.session_state.get('scraping', False) and st.session_state.get('scraping_platform') == platform:
+        # Ensure handles used for scraping are the current ones
+        current_platform_handles = localS.getItem("social_handles").get(platform, [])
+        if not current_platform_handles:
+             st.warning(f"No usernames found for {platform} to scrape. Aborting.")
+             st.session_state.scraping = False
+             st.session_state.scraping_platform = None
+             st.rerun()
+        else:
+            with st.spinner(f"Scraping {platform} data for {len(current_platform_handles)} user(s)..."):
+                try:
+                    # Prepare handles for the scraping function
+                    user_handles_to_scrape = {platform: current_platform_handles}
+
+                    scraped_df_dict = scrape_data(
+                        start=start_date, # Pass date objects directly
+                        end=end_date,     # Pass date objects directly
+                        max_posts=max_posts,
+                        max_comments=max_comments,
+                        user_handles=user_handles_to_scrape
+                    )
+
+                    # Process results for the current platform
+                    scraped_df = scraped_df_dict.get(platform)
+
+                    if scraped_df is not None and not scraped_df.empty:
+                        st.session_state.scraped_data[platform] = scraped_df
+                        st.success(f"Scraped {len(scraped_df)} records for {platform}.")
+                    elif scraped_df is not None and scraped_df.empty:
+                         st.info(f"Scraping finished, but no data matched the criteria for {platform}.")
+                         # Store empty df to indicate scraping happened but found nothing
+                         st.session_state.scraped_data[platform] = pd.DataFrame()
+                    else:
+                        st.error(f"Scraping process did not return data for {platform}.")
+                        # Optionally clear scraped data state for this platform if it failed
+                        if platform in st.session_state.scraped_data:
+                            del st.session_state.scraped_data[platform]
+
+                except Exception as e:
+                    st.error(f"An error occurred during scraping: {e}")
+                    # Optionally clear scraped data state on error
+                    if platform in st.session_state.scraped_data:
+                         del st.session_state.scraped_data[platform]
+
+                finally:
+                    # Always reset scraping state after attempt
+                    st.session_state.scraping = False
+                    st.session_state.scraping_platform = None
+                    st.rerun() # Rerun to show results/errors and hide spinner
+
+    # Display scraped data if available
+    if platform in st.session_state.scraped_data:
+        scraped_df = st.session_state.scraped_data[platform]
+        if not scraped_df.empty:
+            with st.expander(f"{platform} Scraped Data ({len(scraped_df)} rows)", expanded=True):
+                st.dataframe(scraped_df)
+
+                # Prepare download
+                try:
+                    if output_format == "CSV":
+                        data = scraped_df.to_csv(index=False).encode('utf-8')
+                        mime = 'text/csv'
+                        filename = f"{platform}_data_{datetime.now():%Y%m%d_%H%M}.csv"
+                    elif output_format == "JSON":
+                        data = scraped_df.to_json(orient='records', indent=2).encode('utf-8')
+                        mime = 'application/json'
+                        filename = f"{platform}_data_{datetime.now():%Y%m%d_%H%M}.json"
+                    elif output_format == "Excel":
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            scraped_df.to_excel(writer, index=False, sheet_name='Data')
+                        data = output.getvalue()
+                        mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        filename = f"{platform}_data_{datetime.now():%Y%m%d_%H%M}.xlsx"
+
+                    st.download_button(
+                        label=f"Download {platform} data as {output_format}",
+                        data=data,
+                        file_name=filename,
+                        mime=mime,
+                        key=f"download_{platform}"
+                    )
+                except Exception as e:
+                    st.error(f"Error preparing download file: {e}")
+        elif st.session_state.get('scraping', False) == False: # Only show 'no data' if not currently scraping
+             st.info(f"No data was found for {platform} matching the specified criteria.")
+
 
 def get_example_username(platform):
     """Return example username based on platform"""
@@ -187,14 +290,6 @@ def get_example_username(platform):
         "Twitter": "elonmusk",
         "Facebook": "zuck",
         "Instagram": "instagram"
+        # Add more examples if needed
     }
     return examples.get(platform, "username")
-
-def get_platform_data_types(platform):
-    """Return available data types based on platform"""
-    data_types = {
-        "Twitter": ["Tweets", "Replies", "Media", "Profile Info", "Followers", "Following"],
-        "Facebook": ["Posts", "Photos", "Videos", "Events", "Profile Info", "Friends"],
-        "Instagram": ["Posts", "Stories", "Reels", "IGTV", "Profile Info", "Followers", "Following"]
-    }
-    return data_types.get(platform, [])
