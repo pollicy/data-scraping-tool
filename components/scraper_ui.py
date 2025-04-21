@@ -2,11 +2,11 @@ import streamlit as st
 from datetime import datetime, timedelta
 import pandas as pd
 from io import BytesIO
-from components.auth import localS
+from components.auth import get_local_storage
 from utils.manage_social_handles import add_social_handle, remove_social_handle, get_social_handles # Assuming these exist
 from apify_actors import scrape_data # Assuming this exists
-from components.auth import localS
 
+localS = get_local_storage()
 
 def show_all_usernames_dialog(platform, handles):
     """Displays all usernames in a dialog with remove buttons."""
@@ -290,6 +290,5 @@ def get_example_username(platform):
         "Twitter": "elonmusk",
         "Facebook": "zuck",
         "Instagram": "instagram"
-        # Add more examples if needed
     }
     return examples.get(platform, "username")

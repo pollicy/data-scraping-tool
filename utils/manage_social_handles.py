@@ -1,5 +1,6 @@
-from components.auth import localS
+from components.auth import get_local_storage
 
+localS = get_local_storage()
 
 def add_social_handle(platform, username):
     """Add a social handle to the list of handles in local storage."""
@@ -27,6 +28,7 @@ def remove_social_handle(platform, username):
 
 def get_social_handles(platform):
     """Get the list of social handles for a specific platform."""
+    localS = get_local_storage()
     handles = localS.getItem("social_handles")
     if platform in handles:
         return handles[platform]

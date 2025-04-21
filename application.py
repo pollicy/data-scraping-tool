@@ -1,9 +1,11 @@
 # app.py - Main application file
 
 import streamlit as st
-from components.auth import localS
+from components.auth import get_local_storage
 from components.sidebar import render_sidebar
-from components.scraper_ui import render_scraper_ui
+import streamlit.components.v1 as components
+
+localS = get_local_storage()
 
 # Set page configuration
 st.set_page_config(
@@ -12,6 +14,23 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+
+try:
+    from components.scraper_ui import render_scraper_ui
+    
+except ImportError:
+    print("Error importing components. Ensure all dependencies are installed.")
+    components.html(
+        """
+        <script>
+        setTimeout(() => {
+            window.location.reload();
+        }, 3000);
+        </script>
+        """,
+        height=0,
+    )
 
 # Custom CSS for better styling
 st.markdown("""
@@ -56,9 +75,7 @@ def main():
         api_key_input = st.text_input("API Key", type="password", 
                                       help="Your API key will be securely stored in local storage")
         if st.button("Save API Key", use_container_width=True):
-            if api_key_input:
-                print(api_key_input)
-                
+            if api_key_input:                
                 # Save API key to local storage
                 localS.setItem("APIFY_API_KEY", api_key_input, key="save_api_key")
                 
