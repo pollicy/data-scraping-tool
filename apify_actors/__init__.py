@@ -38,33 +38,42 @@ def scrape_data(start:datetime.datetime, end:datetime.datetime, max_posts, max_c
     try:
         print(user_handles)
 
-        # for platform, handles in user_handles.items():
-        #     for handle in handles:
-        #         if platform == "Facebook":
-        #             facebook_df = ScrapeFacebookPosts(client=client, facebook_handle=handle, end_time=end, max_posts=max_posts, max_comments=max_comments, path=FACEBOOK_PATH)
-        #             scraped_facebook_df = pd.concat([scraped_facebook_df, facebook_df], ignore_index=True)
+        for platform, handles in user_handles.items():
+            for handle in handles:
+                if platform == "Facebook":
+                    facebook_df = ScrapeFacebookPosts(client=client, facebook_handle=handle, end_time=end, max_posts=max_posts, max_comments=max_comments, path=FACEBOOK_PATH)
+                    if facebook_df is None:
+                        print(f"Invalid API key")
+                        return None
                     
-        #         elif platform == "Instagram":
-        #             instagram_df = ScrapeInstagramPosts(
-        #                 client=client, username=handle, end_time=end, max_posts=max_posts, max_comments=max_comments, path=INSTAGRAM_PATH
-        #             )
-        #             scraped_instagram_df = pd.concat([scraped_instagram_df, instagram_df], ignore_index=True)
-        #         elif platform == "Twitter":
-        #             twitter_df = ScrapeTwitterPosts(
-        #                 client=client, username=handle, end_time=end, max_posts=max_posts, max_comments=max_comments, path=TWITTER_PATH
-        #             )
-        #             scraped_twitter_df = pd.concat([scraped_twitter_df, twitter_df], ignore_index=True)
+                    scraped_facebook_df = pd.concat([scraped_facebook_df, facebook_df], ignore_index=True)
                     
-        # return {
-        #     "facebook": scraped_facebook_df,
-        #     "instagram": scraped_instagram_df,
-        #     "twitter": scraped_twitter_df
-        # }
+                elif platform == "Instagram":
+                    instagram_df = ScrapeInstagramPosts(
+                        client=client, username=handle, end_time=end, max_posts=max_posts, max_comments=max_comments, path=INSTAGRAM_PATH
+                    )
+                    
+                    if instagram_df is None:
+                        print(f"Invalid API key")
+                        return None
+                    
+                    scraped_instagram_df = pd.concat([scraped_instagram_df, instagram_df], ignore_index=True)
+                elif platform == "Twitter":
+                    twitter_df = ScrapeTwitterPosts(
+                        client=client, username=handle, end_time=end, max_posts=max_posts, max_comments=max_comments, path=TWITTER_PATH
+                    )
+                    
+                    if twitter_df is None:
+                        print(f"Invalid API key")
+                        return None
+                    
+                    scraped_twitter_df = pd.concat([scraped_twitter_df, twitter_df], ignore_index=True)
+
         
         return {
-            "Facebook" : pd.read_excel("scraped_data/facebook/comments/phitchayathan.thanvarat_facebook_2025-03-10.xlsx"),
-            "Instagram" : pd.read_excel("scraped_data/instagram/comments/mizzflav_instagram_2025-04-15.xlsx"),
-            "Twitter" : pd.read_excel("scraped_data/facebook/comments/phitchayathan.thanvarat_facebook_2025-03-10.xlsx")
+            "Facebook" : scraped_facebook_df,
+            "Instagram" : scraped_instagram_df,
+            "Twitter" : scraped_twitter_df
         }
     
     except Exception as e:

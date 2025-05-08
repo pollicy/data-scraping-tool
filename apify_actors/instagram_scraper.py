@@ -60,7 +60,12 @@ def ScrapePostComments(client, post_url, max_comments=100) -> pd.DataFrame:
         "searchType": "hashtag"
     }
     
-    run = client.actor(APIFY_ACTOR_ID).call(run_input=payload)
+    try:
+        run = client.actor(APIFY_ACTOR_ID).call(run_input=payload)
+        
+    except Exception as e:
+        print(f"Invalid API key or Actor ID. Please check your credentials. Error: {e}")
+        return None
     
     # Fetch Actor results from the run's dataset
     data = []
@@ -81,6 +86,10 @@ def ScrapeUserComentsAndPosts(client, username, end_time:datetime.datetime, path
     print(f"Starting scrape for Instagram user: {username}")
     
     scraped_posts_df = ScrapePosts(client, url, end_time, path, max_posts)
+    
+    if scraped_posts_df is None:
+        print(f"Invalid API key")
+        return None
     
     all_comments_df = pd.DataFrame()
     

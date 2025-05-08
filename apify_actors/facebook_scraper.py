@@ -18,7 +18,12 @@ def ScrapePosts(client, url, end_time:datetime.datetime, path : Path, max_posts=
     }
     
     print(f"Scraping posts from {url}...")
-    run = client.actor(POSTS_ACTOR_ID).call(run_input=payload)
+    try:
+        run = client.actor(POSTS_ACTOR_ID).call(run_input=payload)
+    
+    except Exception as e:
+        print(f"Invalid API key or Actor ID. Please check your credentials. Error: {e}")
+        return None
     
     # Fetch Actor results from the run's dataset
     data = []
@@ -63,6 +68,10 @@ def ScrapePostsAndComments(client, facebook_handle, end_time:datetime.datetime, 
     print(f"Starting scrape for Facebook handle: {facebook_handle}")
     
     posts_df = ScrapePosts(client, url, end_time, path, max_posts)
+    
+    if posts_df is None:
+        print(f"Invalid API key or Actor ID. Please check your credentials.")
+        return None
     
     all_comments_df = pd.DataFrame()
     

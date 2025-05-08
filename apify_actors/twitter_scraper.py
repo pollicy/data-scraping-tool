@@ -6,11 +6,12 @@ from pathlib import Path
 POSTS_ACTOR_ID = "nfp1fpt5gUlBwPcor"
 COMMENTS_ACTOR_ID = "qhybbvlFivx7AP0Oh"
 
-def ScrapePosts(client, username, end_time:datetime.datetime, max_posts=100, start_time=datetime.datetime.now()):
+def ScrapePosts(client, username, end_time:datetime.datetime, path : Path, max_posts=100, start_time=datetime.datetime.now()):
     start_time = start_time.strftime("%Y-%m-%d")
     end_time = end_time.strftime("%Y-%m-%d")
     payload = {
             "end": end_time,
+            "start": start_time,
             "maxItems": max_posts,
             "sort": "Latest",
             "start": start_time,
@@ -21,7 +22,12 @@ def ScrapePosts(client, username, end_time:datetime.datetime, max_posts=100, sta
         
     # Run the Actor and wait for it to finish
     print(f"Scraping posts for {username}...")
-    run = client.actor(POSTS_ACTOR_ID).call(run_input=payload)
+    try:
+        run = client.actor(POSTS_ACTOR_ID).call(run_input=payload)
+        
+    except Exception as e:
+        print(f"Invalid API key or Actor ID. Please check your credentials. Error: {e}")
+        return None
     
     # Fetch Actor results from the run's dataset
     data = []
@@ -31,7 +37,7 @@ def ScrapePosts(client, username, end_time:datetime.datetime, max_posts=100, sta
     # Create a DataFrame from the data
     df = pd.DataFrame(data)
         
-    df.to_excel(f"{username}_{start_time}_to_{end_time}_posts.xlsx", index=False)
+    df.to_excel(path / "posts" / f"{username}_{start_time}_to_{end_time}_posts.xlsx", index=False)
         
     return df
  
@@ -59,12 +65,16 @@ def ScrapeComments(client, post_url, max_comments=100):
     return df
          
 def ScrapePostsAndComments(client, username, end_time:datetime.datetime, path : Path, max_posts=100, max_comments=100):
-    scraped_posts_df = ScrapePosts(client, username, end_time, max_posts)
+    scraped_posts_df = ScrapePosts(client=client, username=username, path= path, end_time=end_time, max_posts=max_posts)
+    
+    if scraped_posts_df is None:
+        print(f"Invalid API key or Actor ID. Please check your credentials.")
+        return None
         
     all_comments_df = pd.DataFrame()
         
     if "twitterUrl" in scraped_posts_df.columns and len(scraped_posts_df) > 0:
-                
+    
         for post_url, post in tqdm(zip(scraped_posts_df['twitterUrl'], scraped_posts_df['text']), 
                                  total=len(scraped_posts_df), 
                                  desc=f"Scraping comments for {username}'s posts"):

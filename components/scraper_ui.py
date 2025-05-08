@@ -3,8 +3,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 from io import BytesIO
 from components.auth import get_local_storage
+import time
 from utils.manage_social_handles import add_social_handle, remove_social_handle, get_social_handles # Assuming these exist
 from apify_actors import scrape_data # Assuming this exists
+
 
 localS = get_local_storage()
 
@@ -217,22 +219,31 @@ def render_scraper_ui(platform):
                         max_comments=max_comments,
                         user_handles=user_handles_to_scrape
                     )
-
-                    # Process results for the current platform
-                    scraped_df = scraped_df_dict.get(platform)
-
-                    if scraped_df is not None and not scraped_df.empty:
-                        st.session_state.scraped_data[platform] = scraped_df
-                        st.success(f"Scraped {len(scraped_df)} records for {platform}.")
-                    elif scraped_df is not None and scraped_df.empty:
-                         st.info(f"Scraping finished, but no data matched the criteria for {platform}.")
-                         # Store empty df to indicate scraping happened but found nothing
-                         st.session_state.scraped_data[platform] = pd.DataFrame()
+                    
+                    if scraped_df_dict is None:
+                        st.error("Invalid API key or Actor ID. Please check your credentials.")
+                        st.session_state.scraping = False
+                        st.session_state.scraping_platform = None
+                        # Add delay to show the error message before state reset
+                        time.sleep(2)  # 2 second delay to ensure error message is seen
+                        
                     else:
-                        st.error(f"Scraping process did not return data for {platform}.")
-                        # Optionally clear scraped data state for this platform if it failed
-                        if platform in st.session_state.scraped_data:
-                            del st.session_state.scraped_data[platform]
+
+                        # Process results for the current platform
+                        scraped_df = scraped_df_dict.get(platform)
+
+                        if scraped_df is not None and not scraped_df.empty:
+                            st.session_state.scraped_data[platform] = scraped_df
+                            st.success(f"Scraped {len(scraped_df)} records for {platform}.")
+                        elif scraped_df is not None and scraped_df.empty:
+                            st.info(f"Scraping finished, but no data matched the criteria for {platform}.")
+                            # Store empty df to indicate scraping happened but found nothing
+                            st.session_state.scraped_data[platform] = pd.DataFrame()
+                        else:
+                            st.error(f"Scraping process did not return data for {platform}.")
+                            # Optionally clear scraped data state for this platform if it failed
+                            if platform in st.session_state.scraped_data:
+                                del st.session_state.scraped_data[platform]
 
                 except Exception as e:
                     st.error(f"An error occurred during scraping: {e}")
@@ -264,10 +275,7 @@ def render_scraper_ui(platform):
                         mime = 'application/json'
                         filename = f"{platform}_data_{datetime.now():%Y%m%d_%H%M}.json"
                     elif output_format == "Excel":
-                        output = BytesIO()
-                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                            scraped_df.to_excel(writer, index=False, sheet_name='Data')
-                        data = output.getvalue()
+                        data = scraped_df.to_excel(index=False).encode('utf-8')
                         mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
                         filename = f"{platform}_data_{datetime.now():%Y%m%d_%H%M}.xlsx"
 
