@@ -4,7 +4,6 @@ import pandas as pd
 from io import BytesIO
 from components.auth import get_local_storage
 import time
-from utils.manage_social_handles import add_social_handle, remove_social_handle, get_social_handles # Assuming these exist
 from apify_actors import scrape_data # Assuming this exists
 
 
@@ -33,6 +32,7 @@ def render_scraper_ui(platform):
     """Render the main scraper UI based on the selected platform"""
 
     st.markdown(f'<h2 class="sub-header">{platform} Data Scraper</h2>', unsafe_allow_html=True)
+    is_scrape_user_comments = st.toggle("Scrape Comments", value=True, key=f"scrape_user_comments_{platform}")
 
     # Initialize session state for scraped data if not present
     if "scraped_data" not in st.session_state:
@@ -90,9 +90,16 @@ def render_scraper_ui(platform):
 
         with col_clear:
             if st.button("Clear All", use_container_width=True, key=f"clear_users_{platform}"):
-                handles[platform] = [] # Clear the list for this platform
-                platform_handles = handles[platform] # Update local reference
-                localS.setItem("social_handles", handles) # Save cleared list
+                handles_copy = handles.copy() # Copy to avoid modifying while iterating
+                handles_copy[platform] = [] # Clear the list for this platform
+                handles[platform] = handles_copy[platform] # Update the original handles
+                
+                platform_handles = handles_copy[platform] # Update the reference
+                localS.deleteItem("social_handles") # Clear the storage
+                print(handles_copy)
+                localS.setItem("social_handles", handles_copy) # Save cleared list
+                print(localS.getItem("social_handles"))
+
                 st.success("All usernames cleared!")
                 st.rerun() # Rerun to reflect clearance
 
@@ -217,8 +224,10 @@ def render_scraper_ui(platform):
                         end=end_date,     # Pass date objects directly
                         max_posts=max_posts,
                         max_comments=max_comments,
-                        user_handles=user_handles_to_scrape
+                        user_handles=user_handles_to_scrape,
+                        scrape_comments=is_scrape_user_comments,
                     )
+                
                     
                     if scraped_df_dict is None:
                         st.error("Invalid API key or Actor ID. Please check your credentials.")
@@ -231,6 +240,7 @@ def render_scraper_ui(platform):
 
                         # Process results for the current platform
                         scraped_df = scraped_df_dict.get(platform)
+                        scraped_df = scraped_df['comments']
 
                         if scraped_df is not None and not scraped_df.empty:
                             st.session_state.scraped_data[platform] = scraped_df
@@ -256,6 +266,11 @@ def render_scraper_ui(platform):
                     st.session_state.scraping = False
                     st.session_state.scraping_platform = None
                     st.rerun() # Rerun to show results/errors and hide spinner
+                    
+    if any(df is not None and not df.empty for df in st.session_state.scraped_data.values()):
+        if st.button("Go to Analytics", key=f"go_to_analytics_from_scraper_{platform}", use_container_width=True):
+            st.session_state.current_page = "Analytics"
+            st.rerun()
 
     # Display scraped data if available
     if platform in st.session_state.scraped_data:

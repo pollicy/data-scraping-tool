@@ -9,7 +9,7 @@ localS = get_local_storage()
 
 # Set page configuration
 st.set_page_config(
-    page_title="Social Media Scraper",
+    page_title="Solooza Data",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -17,7 +17,7 @@ st.set_page_config(
 
 
 try:
-    from components.scraper_ui import render_scraper_ui
+    from components import render_ui
     
 except ImportError:
     print("Error importing components. Ensure all dependencies are installed.")
@@ -64,7 +64,7 @@ st.markdown("""
 
 def main():
     
-    st.markdown('<h1 class="main-header">Social Media Data Scraper</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">Solooza Data</h1>', unsafe_allow_html=True)
     
     # Check if API key exists
     api_key = localS.getItem("APIFY_API_KEY")
@@ -89,7 +89,11 @@ def main():
         selected_platform = render_sidebar()
         
         # Render main scraper UI based on selected platform
-        render_scraper_ui(selected_platform)
+        try:
+            render_ui(selected_platform)
+        
+        except Exception as e:
+            st.rerun()
         
         st.markdown('<div class="footer">© 2025 Social Media Scraper. All rights reserved.</div>', 
                    unsafe_allow_html=True)

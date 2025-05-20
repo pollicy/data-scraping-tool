@@ -16,6 +16,8 @@ def get_local_storage():
         # Initialize only once
         try:
             _local_storage_instance = LocalStorage()
+            print(_local_storage_instance.getItem("social_handles"))
+
         except Exception as e:
             # Handle potential errors during LocalStorage initialization
             st.error(f"Error initializing LocalStorage: {e}")
