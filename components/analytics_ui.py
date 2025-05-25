@@ -46,8 +46,8 @@ def render_analytics_ui():
     text_cols, date_cols, categorical_cols, numerical_cols = analytics_utils.get_dataframe_columns(platform_df)
 
     # Use tabs for different analysis types
-    tab_sentiment, tab_wordcloud, tab_trends, tab_distribution, tab_raw = st.tabs(
-        ["Sentiment Analysis", "Word Cloud", "Trends", "Distributions", "Raw Data"]
+    tab_sentiment, tab_wordcloud, tab_trends, tab_raw = st.tabs(
+        ["Sentiment Analysis", "Word Cloud", "Trends", "Raw Data"]
     )
 
     with tab_sentiment:
@@ -78,9 +78,9 @@ def render_analytics_ui():
                  else:
                     st.warning("Please select a text column.")
 
-
     with tab_wordcloud:
         st.subheader("Word Cloud")
+        
         if not text_cols:
              st.warning("No suitable text columns found for word cloud generation.")
         else:
@@ -99,7 +99,6 @@ def render_analytics_ui():
                             st.info("Could not generate word cloud. No text available or after cleaning.")
                 else:
                     st.warning("Please select a text column.")
-
 
     with tab_trends:
         st.subheader("Trend Analysis")
@@ -135,35 +134,7 @@ def render_analytics_ui():
                 else:
                     st.warning("Please select a date column.")
 
-    with tab_distribution:
-        st.subheader("Data Distribution")
-        if not categorical_cols:
-            st.warning("No suitable categorical or ID columns found for distribution analysis.")
-        else:
-            dist_col = st.selectbox(
-                "Select column for Distribution Analysis",
-                categorical_cols,
-                key=f"dist_col_{selected_platform}"
-            )
-            dist_top_n = st.slider(
-                "Show top N items",
-                min_value=5,
-                max_value=min(50, platform_df[dist_col].nunique() if dist_col in platform_df.columns else 10), # Limit max slider value
-                value=10,
-                 key=f"dist_top_n_{selected_platform}"
-            )
-
-            if st.button("Analyze Distribution", key=f"analyze_distribution_{selected_platform}"):
-                 if dist_col:
-                     with st.spinner("Analyzing distribution..."):
-                        fig = analytics_utils.analyze_distribution(platform_df, dist_col, top_n=dist_top_n)
-                        if fig:
-                            st.plotly_chart(fig, use_container_width=True)
-                        else:
-                            st.info(f"Could not analyze distribution for column '{dist_col}'. Check data.")
-                 else:
-                    st.warning("Please select a column.")
-
+    print("here")
     with tab_raw:
         st.subheader("Raw Scraped Data")
         st.dataframe(platform_df)

@@ -319,7 +319,7 @@ def ScrapeUserComentsAndPosts(
     # --- 3. Determine which posts need comments scraped ---
     posts_to_scrape_comments_df = posts_df_for_comments[
         (~posts_df_for_comments['url'].isin(existing_comment_post_identifiers))
-    ].copy() # Use .copy() to avoid SettingWithCopyWarning
+    ].copy()
 
     all_post_urls_from_scrape = posts_df_for_comments['url'].tolist()
     total_posts_with_urls = len(all_post_urls_from_scrape)

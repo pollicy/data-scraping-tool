@@ -245,11 +245,13 @@ def analyze_distribution(df: pd.DataFrame, column: str, top_n: int = 10):
 # Helper to get available text/date columns for the UI
 def get_dataframe_columns(df: pd.DataFrame):
     """Returns lists of potential text, date, and categorical columns."""
+
     text_cols = [col for col in df.columns if df[col].dtype == 'object' or df[col].dtype == 'string']
     # Attempt to identify date columns
     date_cols = [col for col in df.columns if col.lower() in ['date', 'datetime', 'created_at', 'timestamp'] or 'date' in col.lower() or 'time' in col.lower()]
+
     # Categorical/Distribution columns (often text/object, or int IDs)
-    categorical_cols = [col for col in df.columns if df[col].nunique() < 50 or df[col].dtype in ['object', 'string', 'category', 'int64']] # Heuristic based on unique values or dtype
+    categorical_cols = df.select_dtypes(include=['object', 'string', 'category']).columns.tolist()
 
     # Remove potential overlaps or less useful columns for distribution
     system_cols = ['vader_score', 'sentiment'] # Columns we might add
