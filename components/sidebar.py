@@ -10,7 +10,7 @@ def render_sidebar():
     st.sidebar.markdown("### Select Platform")
     platform = st.sidebar.radio(
         "Choose a platform to scrape:",
-        ["Twitter", "Facebook", "Instagram"],
+        ["Twitter", "Facebook", "Instagram", "LinkedIn"],
         index=0,
         help="Select the social media platform you want to scrape data from"
     )

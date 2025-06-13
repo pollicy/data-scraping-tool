@@ -1,347 +1,253 @@
+import datetime
+import pandas as pd
+from pathlib import Path
+from typing import Dict, List, Any, Callable, Tuple, TypedDict, Optional
+
 from apify_client import ApifyClient
+# Assuming these imports remain correct
+from components.auth import get_api_key
 from .twitter_scraper import ScrapePostsAndComments as ScrapeTwitterPostsAndComments, ScrapePosts as ScrapeTwitterPosts
 from .instagram_scraper import ScrapeUserComentsAndPosts as ScrapeInstagramPostsAndComments, ScrapePosts as ScrapeInstagramPosts
 from .facebook_scraper import ScrapePostsAndComments as ScrapeFacebookPostsAndComments, ScrapePosts as ScrapeFacebookPosts
-from typing import Dict
-from pathlib import Path
-import datetime
-from components.auth import get_api_key # Assuming this correctly gets your API key
-import pandas as pd
+from .linkedin_scraper import ScrapePostsAndComments as ScrapeLinkedinPostsAndComments, ScrapePosts as ScrapeLinkedinPosts
 
-# --- Path Setup (Keep as is) ---
+# --- Type Hinting for Configuration (Unchanged) ---
+class PlatformConfig(TypedDict):
+    posts_scraper: Callable
+    posts_and_comments_scraper: Callable
+    path: Path
+    handle_arg_name: str
+    threads_arg_name: str
+    post_id_col: str
+    comment_id_col: str
+
+# --- Central Configuration Registry (Unchanged) ---
 DEFAULT_PATH = Path("scraped_data")
-FACEBOOK_PATH = DEFAULT_PATH / "facebook"
-INSTAGRAM_PATH = DEFAULT_PATH / "instagram"
-TWITTER_PATH = DEFAULT_PATH / "twitter"
+PLATFORM_REGISTRY: Dict[str, PlatformConfig] = {
+    "Facebook": {
+        "posts_scraper": ScrapeFacebookPosts,
+        "posts_and_comments_scraper": ScrapeFacebookPostsAndComments,
+        "path": DEFAULT_PATH / "facebook",
+        "handle_arg_name": "facebook_handle",
+        "threads_arg_name": "max_threads",
+        "post_id_col": "url",
+        "comment_id_col": "id",
+    },
+    "Instagram": {
+        "posts_scraper": ScrapeInstagramPosts,
+        "posts_and_comments_scraper": ScrapeInstagramPostsAndComments,
+        "path": DEFAULT_PATH / "instagram",
+        "handle_arg_name": "username",
+        "threads_arg_name": "max_threads",
+        "post_id_col": "shortcode",
+        "comment_id_col": "id",
+    },
+    "Twitter": {
+        "posts_scraper": ScrapeTwitterPosts,
+        "posts_and_comments_scraper": ScrapeTwitterPostsAndComments,
+        "path": DEFAULT_PATH / "twitter",
+        "handle_arg_name": "username",
+        "threads_arg_name": "max_threads",
+        "post_id_col": "tweetId",
+        "comment_id_col": "id",
+    },
+    "LinkedIn": {
+        "posts_scraper": ScrapeLinkedinPosts,
+        "posts_and_comments_scraper": ScrapeLinkedinPostsAndComments,
+        "path": DEFAULT_PATH / "linkedin",
+        "handle_arg_name": "username",
+        "threads_arg_name": "max_threads",
+        "post_id_col": "url",
+        "comment_id_col": "comment_id",
+    },
+}
 
-# Ensure directories exist
-FACEBOOK_PATH.mkdir(parents=True, exist_ok=True)
-INSTAGRAM_PATH.mkdir(parents=True, exist_ok=True)
-TWITTER_PATH.mkdir(parents=True, exist_ok=True)
+class PlatformScraper:
+    """
+    A reusable scraper for social media platforms, configured at initialization
+    and capable of scraping one or all platforms on demand.
+    """
 
-for directory in [FACEBOOK_PATH, INSTAGRAM_PATH, TWITTER_PATH]:
-    posts_directory = directory / "posts"
-    comments_directory = directory / "comments"
-    posts_directory.mkdir(parents=True, exist_ok=True)
-    comments_directory.mkdir(parents=True, exist_ok=True)
+    def __init__(self, api_key: str, **default_thread_counts: int):
+        """
+        Initializes the scraper with the Apify client and default thread counts.
 
-# --- Scraping Function ---
-def scrape_data(
-    start: datetime.datetime,
-    end: datetime.datetime,
-    max_posts: int,
-    max_comments: int,
-    user_handles: Dict,
-    scrape_comments: bool,
-    facebook_max_threads: int = 10,
-    twitter_max_threads: int = 15,
-    instagram_max_threads: int = 10 # Add parameter for Instagram threading
-):
-    """Scrape data from social media platforms based on user handles."""
-
-    if not user_handles:
-        print("No user handles provided.")
-        # Return empty DataFrames with the new nested structure for all platforms
-        return {
-            "Facebook": {"posts": pd.DataFrame(), "comments": pd.DataFrame()},
-            "Instagram": {"posts": pd.DataFrame(), "comments": pd.DataFrame()}, # Updated Instagram return structure
-            "Twitter": {"posts": pd.DataFrame(), "comments": pd.DataFrame()}
+        Args:
+            api_key: Your Apify API key.
+            **default_thread_counts: Set default threads, e.g.,
+                                     facebook_max_threads=10, twitter_max_threads=15
+        """
+        self.client = ApifyClient(api_key)
+        print("api key set:", api_key)
+        
+        # Store default thread counts in a structured way
+        self.thread_counts = {
+            "Facebook": default_thread_counts.get("facebook_max_threads", 10),
+            "Instagram": default_thread_counts.get("instagram_max_threads", 10),
+            "Twitter": default_thread_counts.get("twitter_max_threads", 15),
+            "LinkedIn": default_thread_counts.get("linkedin_max_threads", 15),
         }
+        print("--- Scraper Initialized ---")
+        print(f"Default Thread Counts: {self.thread_counts}")
 
-    client = ApifyClient(get_api_key())
+    def _setup_directories(self, platform_name: str):
+        """Creates necessary directories for a single, specified platform."""
+        config = PLATFORM_REGISTRY.get(platform_name)
+        if config:
+            base_path = config["path"]
+            base_path.mkdir(parents=True, exist_ok=True)
+            (base_path / "posts").mkdir(exist_ok=True)
+            (base_path / "comments").mkdir(exist_ok=True)
 
-    # --- Initialize cumulative DataFrames *before* the loop ---
-    # Separate DataFrames for posts and comments for Facebook, Instagram, and Twitter
-    cumulative_facebook_posts_df = pd.DataFrame()
-    cumulative_facebook_comments_df = pd.DataFrame()
+    def _deduplicate_df(self, df: pd.DataFrame, id_col: str, item_type: str, platform: str) -> pd.DataFrame:
+        """Helper to remove duplicates from a DataFrame and print a summary."""
+        if not id_col or id_col not in df.columns or df.empty:
+            return df
+        
+        initial_count = len(df)
+        df.drop_duplicates(subset=[id_col], inplace=True, ignore_index=True)
+        removed_count = initial_count - len(df)
+        if removed_count > 0:
+            print(f"Removed {removed_count} duplicate {item_type} for {platform} based on '{id_col}'.")
+        return df
 
-    cumulative_twitter_posts_df = pd.DataFrame()
-    cumulative_twitter_comments_df = pd.DataFrame()
+    def scrape(
+        self,
+        platform: str,
+        handles: List[str],
+        start: datetime.datetime,
+        end: datetime.datetime,
+        max_posts: int,
+        max_comments: int,
+        scrape_comments: bool,
+        max_threads: Optional[int] = None
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Scrapes data for a single specified platform.
 
-    cumulative_instagram_posts_df = pd.DataFrame() 
-    cumulative_instagram_comments_df = pd.DataFrame() 
+        Args:
+            platform: The name of the platform to scrape (e.g., "Twitter").
+            handles: A list of user handles for that platform.
+            start: The start date for scraping.
+            end: The end date for scraping.
+            max_posts: Max posts to scrape per handle.
+            max_comments: Max comments to scrape per post.
+            scrape_comments: Whether to scrape comments.
+            max_threads: Optionally override the default thread count for this run.
 
+        Returns:
+            A dictionary containing 'posts' and 'comments' DataFrames for the platform.
+        """
+        config = PLATFORM_REGISTRY.get(platform)
+        if not config:
+            print(f"Error: Platform '{platform}' is not supported. Skipping.")
+            return {"posts": pd.DataFrame(), "comments": pd.DataFrame()}
 
-    print("\n--- Starting Multi-Platform Scrape ---")
-    print(f"Handles to process: {user_handles}")
-    print(f"Date range for posts: {start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}")
-    print(f"Scraping comments: {scrape_comments}")
-    print(f"Facebook concurrent comment tasks: {facebook_max_threads}")
-    print(f"Twitter concurrent comment tasks: {twitter_max_threads}")
-    print(f"Instagram concurrent comment tasks: {instagram_max_threads}") # Print Instagram threads
+        if not handles:
+            print(f"No handles provided for {platform}. Skipping.")
+            return {"posts": pd.DataFrame(), "comments": pd.DataFrame()}
 
+        self._setup_directories(platform)
+        
+        print(f"\n---== Processing Platform: {platform.upper()} ==---")
+        print(f"Handles: {handles}")
 
-    try:
-        for platform, handles in user_handles.items():
-            if not handles:
-                print(f"No handles provided for {platform}. Skipping.")
-                continue
+        cumulative_posts_df = pd.DataFrame()
+        cumulative_comments_df = pd.DataFrame()
 
-            print(f"\n--- Processing Platform: {platform} with handles {handles} ---")
+        for handle in handles:
+            print(f"\n--- Processing Handle: {handle} ---")
+            
+            scraper_func = config['posts_and_comments_scraper'] if scrape_comments else config['posts_scraper']
+            
+            scraper_args = {
+                "client": self.client,
+                config['handle_arg_name']: handle,
+                "start_time": start, "end_time": end, "max_posts": max_posts, "path": config['path'],
+            }
 
-            for handle in handles:
-                print(f"\n--- Processing Handle: {handle} on {platform} ---")
+            if scrape_comments:
+                # Use override `max_threads` if provided, otherwise use class default
+                thread_count = max_threads if max_threads is not None else self.thread_counts.get(platform, 10)
+                scraper_args["max_comments"] = max_comments
+                scraper_args[config['threads_arg_name']] = thread_count
+                print(f"Using {thread_count} concurrent tasks for comments.")
 
-                # --- Facebook Logic (Keep as is) ---
-                if platform == "Facebook":
-                    if scrape_comments:
-                        # Call the combined function which returns (posts_df, comments_df)
-                        posts_df_this_handle, comments_df_this_handle = ScrapeFacebookPostsAndComments(
-                            client=client,
-                            facebook_handle=handle,
-                            start_time=start,
-                            end_time=end,
-                            max_posts=max_posts,
-                            max_comments=max_comments,
-                            path=FACEBOOK_PATH,
-                            max_threads=facebook_max_threads
-                        )
-
-                        # Check if the process for this handle succeeded
-                        if posts_df_this_handle is None or comments_df_this_handle is None:
-                             print(f"API key issue or critical error during Facebook scrape for {handle}. Skipping this handle.")
-                             continue
-
-                        # Append the posts scraped in *this run* for *this handle*
-                        if not posts_df_this_handle.empty:
-                             print(f"Adding {len(posts_df_this_handle)} posts from {handle} (this run) to cumulative Facebook posts.")
-                             cumulative_facebook_posts_df = pd.concat(
-                                 [cumulative_facebook_posts_df, posts_df_this_handle],
-                                 ignore_index=True
-                             )
-
-                        # Append the *combined* comments (new + existing) for *this handle*
-                        if not comments_df_this_handle.empty:
-                             print(f"Adding {len(comments_df_this_handle)} comments from {handle} (total for handle including existing) to cumulative Facebook comments.")
-                             cumulative_facebook_comments_df = pd.concat(
-                                 [cumulative_facebook_comments_df, comments_df_this_handle],
-                                 ignore_index=True
-                             )
-
-                             if 'id' in cumulative_facebook_comments_df.columns:
-                                  initial_count = len(cumulative_facebook_comments_df)
-                                  cumulative_facebook_comments_df.drop_duplicates(subset=['id'], inplace=True)
-                                  if len(cumulative_facebook_comments_df) < initial_count:
-                                       print(f"Removed {initial_count - len(cumulative_facebook_comments_df)} duplicate comments across handles in cumulative Facebook comments.")
-                             else:
-                                  print("Warning: 'id' column not found in Facebook comments for robust cross-handle duplicate checking.")
-
-
-                    else: # scrape_comments is False, only scrape posts for Facebook
-                        posts_df_this_handle = ScrapeFacebookPosts(
-                            client=client,
-                            facebook_handle=handle,
-                            start_time=start,
-                            end_time=end,
-                            max_posts=max_posts,
-                            path=FACEBOOK_PATH
-                        )
-
-                        # Check if the process for this handle succeeded
-                        if posts_df_this_handle is None:
-                             print(f"API key issue or critical error during Facebook post scrape for {handle}. Skipping this handle.")
-                             continue
-
-                        # Append the posts from *this run* for *this handle*
-                        if not posts_df_this_handle.empty:
-                            print(f"Adding {len(posts_df_this_handle)} posts from {handle} (this run) to cumulative Facebook posts.")
-                            cumulative_facebook_posts_df = pd.concat(
-                                [cumulative_facebook_posts_df, posts_df_this_handle],
-                                ignore_index=True
-                            )
-
-                        else:
-                             print(f"No posts returned from scraper for handle {handle} (comments=False) in this run.")
-
-
-                # --- Instagram Logic (UPDATED to handle tuple return and separate DFs) ---
-                elif platform == "Instagram":
-                    if scrape_comments:
-                        # Call the combined function which returns (posts_df_this_run, combined_comments_df_for_this_user)
-                        posts_df_this_handle, comments_df_this_handle = ScrapeInstagramPostsAndComments(
-                            client=client,
-                            username=handle,
-                            start_time=start, # Pass start_time (used by Instagram scraper)
-                            end_time=end,     # Pass end_time (kept for consistency)
-                            max_posts=max_posts,
-                            max_comments=max_comments,
-                            path=INSTAGRAM_PATH,
-                            max_threads=instagram_max_threads # Pass the threading parameter
-                        )
-
-                        # Check if the process for this handle succeeded
-                        # Note: ScrapeInstagramPostsAndComments returns (None, None) if post scrape fails critically
-                        if posts_df_this_handle is None or comments_df_this_handle is None:
-                             print(f"API key issue or critical error during Instagram scrape for {handle}. Skipping this handle.")
-                             continue # Move to the next handle
-
-                        # Append the posts scraped in *this run* for *this handle*
-                        if not posts_df_this_handle.empty:
-                             print(f"Adding {len(posts_df_this_handle)} posts from {handle} (this run) to cumulative Instagram posts.")
-                             cumulative_instagram_posts_df = pd.concat(
-                                 [cumulative_instagram_posts_df, posts_df_this_handle],
-                                 ignore_index=True
-                             )
-                            
-                        # Append the *combined* comments (new + existing) for *this handle*
-                        # ScrapeInstagramPostsAndComments returns the combined historical comments for this user
-                        if not comments_df_this_handle.empty:
-                             print(f"Adding {len(comments_df_this_handle)} comments from {handle} (total for handle including existing) to cumulative Instagram comments.")
-                             cumulative_instagram_comments_df = pd.concat(
-                                 [cumulative_instagram_comments_df, comments_df_this_handle],
-                                 ignore_index=True
-                             )
-                             # Drop duplicates in the cumulative comments DataFrame across *all* handles processed so far
-                             # This is important if multiple handles could comment on the same post and their comments get pulled multiple times
-                             if 'id' in cumulative_instagram_comments_df.columns: # Assuming 'id' is a unique comment identifier from Instagram actor
-                                  initial_count = len(cumulative_instagram_comments_df)
-                                  cumulative_instagram_comments_df.drop_duplicates(subset=['id'], inplace=True)
-                                  if len(cumulative_instagram_comments_df) < initial_count:
-                                       print(f"Removed {initial_count - len(cumulative_instagram_comments_df)} duplicate comments across handles in cumulative Instagram comments.")
-                             else:
-                                  print("Warning: 'id' column not found in Instagram comments for robust cross-handle duplicate checking.")
-
-
-                    else: # scrape_comments is False, only scrape posts for Instagram
-                        posts_df_this_handle = ScrapeInstagramPosts(
-                            client=client,
-                            username=handle,
-                            start_time=start, # Pass start_time
-                            end_time=end,     # Pass end_time
-                            max_posts=max_posts,
-                            path=INSTAGRAM_PATH
-                        )
-
-                        # Check if the process for this handle succeeded
-                        if posts_df_this_handle is None:
-                            print(f"API key issue or critical error during Instagram post scrape for {handle}. Skipping this handle.")
-                            continue # Move to the next handle
-
-                        # Append the posts from *this run* for *this handle*
-                        if not posts_df_this_handle.empty:
-                            print(f"Adding {len(posts_df_this_handle)} posts from {handle} (this run) to cumulative Instagram posts.")
-                            cumulative_instagram_posts_df = pd.concat(
-                                [cumulative_instagram_posts_df, posts_df_this_handle],
-                                ignore_index=True
-                            )
-                            # Optional: Drop duplicates based on shortcode/url across handles if needed
-                            if 'shortcode' in cumulative_instagram_posts_df.columns:
-                                initial_count = len(cumulative_instagram_posts_df)
-                                cumulative_instagram_posts_df.drop_duplicates(subset=['shortcode'], inplace=True)
-                                if len(cumulative_instagram_posts_df) < initial_count:
-                                     print(f"Removed {initial_count - len(cumulative_instagram_posts_df)} duplicate Instagram posts across handles based on 'shortcode'.")
-                        else:
-                             print(f"No posts returned from scraper for handle {handle} (comments=False) in this run.")
-
-
-                # --- Twitter Logic (Keep as is) ---
-                elif platform == "Twitter":
-                    if scrape_comments:
-                        # Call the combined function which returns (posts_df_this_run, combined_comments_df_for_this_user)
-                        posts_df_this_handle, comments_df_this_handle = ScrapeTwitterPostsAndComments(
-                            client=client,
-                            username=handle,
-                            start_time=start, # Twitter scraper uses start/end date range for posts
-                            end_time=end,
-                            max_posts=max_posts,
-                            max_comments=max_comments,
-                            path=TWITTER_PATH,
-                            max_threads=twitter_max_threads # Pass the threading parameter
-                        )
-
-                        # Check if the process for this handle succeeded
-                        # Note: ScrapeTwitterPostsAndComments returns (None, None) if post scrape fails critically
-                        if posts_df_this_handle is None or comments_df_this_handle is None:
-                             print(f"API key issue or critical error during Twitter scrape for {handle}. Skipping this handle.")
-                             continue # Move to the next handle
-
-                        # Append the posts scraped in *this run* for *this handle*
-                        # ScrapeTwitterPostsAndComments returns posts from the date range in this run
-                        if not posts_df_this_handle.empty:
-                             print(f"Adding {len(posts_df_this_handle)} posts from {handle} (this run) to cumulative Twitter posts.")
-                             cumulative_twitter_posts_df = pd.concat(
-                                 [cumulative_twitter_posts_df, posts_df_this_handle],
-                                 ignore_index=True
-                             )
-
-                        # Append the *combined* comments (new + existing) for *this handle*
-                        # ScrapeTwitterPostsAndComments returns the combined historical comments for this user
-                        if not comments_df_this_handle.empty:
-                             print(f"Adding {len(comments_df_this_handle)} comments from {handle} (total for handle including existing) to cumulative Twitter comments.")
-                             cumulative_twitter_comments_df = pd.concat(
-                                 [cumulative_twitter_comments_df, comments_df_this_handle],
-                                 ignore_index=True
-                             )
-                             # Drop duplicates in the cumulative comments DataFrame across *all* handles processed so far
-                             # This is important if multiple handles could comment on the same post and their comments get pulled multiple times
-                             if 'id' in cumulative_twitter_comments_df.columns: # Assuming 'id' is a unique comment/reply identifier from Twitter actor
-                                  initial_count = len(cumulative_twitter_comments_df)
-                                  cumulative_twitter_comments_df.drop_duplicates(subset=['id'], inplace=True)
-                                  if len(cumulative_twitter_comments_df) < initial_count:
-                                       print(f"Removed {initial_count - len(cumulative_twitter_comments_df)} duplicate comments across handles in cumulative Twitter comments.")
-                             else:
-                                  print("Warning: 'id' column not found in Twitter comments for robust cross-handle duplicate checking.")
-
-
-                    else: # scrape_comments is False, only scrape posts for Twitter
-                        # Call the posts-only function which returns a single DataFrame
-                        posts_df_this_handle = ScrapeTwitterPosts(
-                            client=client,
-                            username=handle,
-                            start_time=start,
-                            end_time=end,
-                            max_posts=max_posts,
-                            path=TWITTER_PATH
-                        )
-
-                        # Check if the process for this handle succeeded
-                        if posts_df_this_handle is None:
-                            print(f"API key issue or critical error during Twitter post scrape for {handle}. Skipping this handle.")
-                            continue # Move to the next handle
-
-                        # Append the posts from *this run* for *this handle*
-                        if not posts_df_this_handle.empty:
-                            print(f"Adding {len(posts_df_this_handle)} posts from {handle} (this run) to cumulative Twitter posts.")
-                            cumulative_twitter_posts_df = pd.concat(
-                                [cumulative_twitter_posts_df, posts_df_this_handle],
-                                ignore_index=True
-                            )
-                             # Optional: Drop duplicates based on url/tweetId across handles if needed
-                            if 'tweetId' in cumulative_twitter_posts_df.columns:
-                                 initial_count = len(cumulative_twitter_posts_df)
-                                 cumulative_twitter_posts_df.drop_duplicates(subset=['tweetId'], inplace=True)
-                                 if len(cumulative_twitter_posts_df) < initial_count:
-                                      print(f"Removed {initial_count - len(cumulative_twitter_posts_df)} duplicate Twitter posts across handles based on 'tweetId'.")
-                        else:
-                             print(f"No posts returned from scraper for handle {handle} (comments=False) in this run.")
-
+            # --- Execute Scraper ---
+            try:
+                scraped_data = scraper_func(**scraper_args)
+                
+                posts_df, comments_df = (None, None)
+                if scrape_comments:
+                    if isinstance(scraped_data, tuple) and len(scraped_data) == 2:
+                        posts_df, comments_df = scraped_data
+                    else:
+                        print(f"Error: Scraper for {platform} (with comments) did not return a valid result tuple.")
+                        continue
                 else:
-                    print(f"Warning: Unsupported platform '{platform}' for handle '{handle}'. Skipping.")
-                    continue # Skip this platform/handle combination
+                    posts_df = scraped_data
 
-        # --- Final Cumulative DataFrames & Return ---
-        print("\n--- Multi-Platform Scrape Complete ---")
-        print(f"Total Facebook Posts collected: {len(cumulative_facebook_posts_df)}")
-        print(f"Total Facebook Comments collected: {len(cumulative_facebook_comments_df)}")
-        print(f"Total Instagram Posts collected: {len(cumulative_instagram_posts_df)}") # Updated print
-        print(f"Total Instagram Comments collected: {len(cumulative_instagram_comments_df)}") # Updated print
-        print(f"Total Twitter Posts collected: {len(cumulative_twitter_posts_df)}")
-        print(f"Total Twitter Comments collected: {len(cumulative_twitter_comments_df)}")
+                if posts_df is None:
+                    print(f"Critical error during scrape for {handle}. Skipping this handle.")
+                    continue
 
-        # Return the separate cumulative DataFrames for each platform in the new nested structure
-        return {
-            "Facebook": {"posts": cumulative_facebook_posts_df, "comments": cumulative_facebook_comments_df},
-            "Instagram": {"posts": cumulative_instagram_posts_df, "comments": cumulative_instagram_comments_df}, # Updated Instagram return structure
-            "Twitter": {"posts": cumulative_twitter_posts_df, "comments": cumulative_twitter_comments_df}
-        }
+                if not posts_df.empty:
+                    print(f"Received {len(posts_df)} new posts from {handle}.")
+                    cumulative_posts_df = pd.concat([cumulative_posts_df, posts_df], ignore_index=True)
 
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"\nAn error occurred during the scraping process: {e}")
-        # Return empty DataFrames with the new nested structure on failure
-        return {
-            "Facebook": {"posts": None, "comments": None},
-            "Instagram": {"posts": None, "comments": None},
-            "Twitter": {"posts": None, "comments": None}
-        }
+                if comments_df is not None and not comments_df.empty:
+                    print(f"Received {len(comments_df)} comments from {handle}.")
+                    cumulative_comments_df = pd.concat([cumulative_comments_df, comments_df], ignore_index=True)
+
+            except Exception as e:
+                import traceback
+                print(f"An error occurred while scraping handle '{handle}' on '{platform}': {e}")
+                traceback.print_exc()
+                continue
+        
+        # --- Final Deduplication and Summary for the Platform ---
+        final_posts = self._deduplicate_df(cumulative_posts_df, config['post_id_col'], 'posts', platform)
+        final_comments = self._deduplicate_df(cumulative_comments_df, config['comment_id_col'], 'comments', platform)
+        
+        print(f"\n--- {platform.upper()} Scrape Complete ---")
+        print(f"Total unique posts collected: {len(final_posts)}")
+        print(f"Total unique comments collected: {len(final_comments)}")
+
+        return {"posts": final_posts, "comments": final_comments}
+
+    def scrape_all(
+        self,
+        user_handles: Dict[str, List[str]],
+        start: datetime.datetime,
+        end: datetime.datetime,
+        max_posts: int,
+        max_comments: int,
+        scrape_comments: bool
+    ) -> Dict[str, Dict[str, pd.DataFrame]]:
+        """
+        A convenience method to scrape all platforms defined in the user_handles dictionary.
+
+        Args:
+            user_handles: A dictionary mapping platform names to lists of user handles.
+            (Other arguments are the same as the scrape method)
+
+        Returns:
+            A nested dictionary containing the results for all scraped platforms.
+            { "PlatformName": {"posts": pd.DataFrame, "comments": pd.DataFrame} }
+        """
+        print("\n---### Starting Full Scrape for All Provided Platforms ###---")
+        all_results = {}
+        for platform, handles in user_handles.items():
+            # This method will call the main 'scrape' method for each platform
+            platform_result = self.scrape(
+                platform=platform,
+                handles=handles,
+                start=start,
+                end=end,
+                max_posts=max_posts,
+                max_comments=max_comments,
+                scrape_comments=scrape_comments
+            )
+            all_results[platform] = platform_result
+        print("\n---### Full Scrape Finished ###---")
+        return all_results

@@ -4,7 +4,7 @@ import pandas as pd
 from io import BytesIO
 from components.auth import get_local_storage
 import time
-from apify_actors import scrape_data # Assuming this exists
+from apify_actors import PlatformScraper
 
 
 localS = get_local_storage()
@@ -218,29 +218,38 @@ def render_scraper_ui(platform):
                 try:
                     # Prepare handles for the scraping function
                     user_handles_to_scrape = {platform: current_platform_handles}
+                    print(localS.getItem("APIFY_API_KEY"))
 
-                    scraped_df_dict = scrape_data(
-                        start=start_date, # Pass date objects directly
-                        end=end_date,     # Pass date objects directly
+                    platform_scraper = PlatformScraper(api_key=localS.getItem("APIFY_API_KEY"))
+
+                    scraped_df_dict = platform_scraper.scrape(
+                        platform=platform,
+                        start=start_date,  # Pass date objects directly
+                        end=end_date,      # Pass date objects directly
                         max_posts=max_posts,
                         max_comments=max_comments,
-                        user_handles=user_handles_to_scrape,
+                        handles=user_handles_to_scrape[platform],
                         scrape_comments=is_scrape_user_comments,
                     )
-                
                     
                     if scraped_df_dict is None:
                         st.error("Invalid API key or Actor ID. Please check your credentials.")
                         st.session_state.scraping = False
                         st.session_state.scraping_platform = None
                         # Add delay to show the error message before state reset
-                        time.sleep(2)  # 2 second delay to ensure error message is seen
-                        
+                        time.sleep(20)  # 20 second delay to ensure error message is seen
+                        st.session_state.scraping = False
+                        st.session_state.scraping_platform = None
                     else:
+                        print(scraped_df_dict)  # Debugging output to see what was returned
 
                         # Process results for the current platform
-                        scraped_df = scraped_df_dict.get(platform)
-                        scraped_df = scraped_df['comments']
+                        
+                        
+                        scraped_df = scraped_df_dict['posts']
+                        
+                        if is_scrape_user_comments:
+                            scraped_df = scraped_df_dict['comments']
 
                         if scraped_df is not None and not scraped_df.empty:
                             st.session_state.scraped_data[platform] = scraped_df
@@ -256,7 +265,10 @@ def render_scraper_ui(platform):
                                 del st.session_state.scraped_data[platform]
 
                 except Exception as e:
+                    import traceback
+                    traceback.print_exc()  # Print the full traceback for debugging
                     st.error(f"An error occurred during scraping: {e}")
+                    time.sleep(5)  # Delay to allow user to read the error message
                     # Optionally clear scraped data state on error
                     if platform in st.session_state.scraped_data:
                          del st.session_state.scraped_data[platform]
